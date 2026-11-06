@@ -29,8 +29,9 @@ int main (int argc, char** argv)
     {
         std::set<int> notes; int buttons = 0;
         for (int i = 0; i < NUM_CTL; ++i)
-            if (triggerNote (i) >= 0) { ++buttons; check (notes.insert (triggerNote (i)).second && controlForNote (triggerNote (i)) == i, "Noten eindeutig"); check (triggerNote (i) < VALUE_NOTE_BASE, "Noten unter dem Wertebereich"); }
+            if (triggerNote (i) >= 0) { ++buttons; check (notes.insert (triggerNote (i)).second && controlForNote (triggerNote (i)) == i, "Noten eindeutig"); check (triggerNote (i) >= VALUE_NOTE_BASE + NUM_CTL && triggerNote (i) <= 127, "Noten getrennt vom Wertebereich"); }
         check (buttons == 33, "33 Tasten mit Sound-Platz");
+        check (triggerNote (controlForCc (32)) == 60, "Step auf C5 spielt S 1");
         check (VALUE_NOTE_BASE + NUM_CTL - 1 <= 127, "Wertnoten passen");
         check (std::fabs (valueFromVelocity (127) - 1.0f) < 1e-6f && valueFromVelocity (1) == 0.0f, "Wert aus Anschlag");
         std::printf ("Reihenfolge:");

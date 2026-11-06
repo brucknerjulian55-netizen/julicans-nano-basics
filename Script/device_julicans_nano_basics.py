@@ -18,7 +18,7 @@ import ui
 PLUGIN_NAME = "julicans nano basics"
 NUM_PRESETS = 8
 TRACK_LEFT, TRACK_RIGHT = 58, 59
-VALUE_NOTE_BASE = 70           # Note 70 + Reglernummer traegt den Wert als Anschlag
+VALUE_NOTE_BASE = 0            # Note 0 + Reglernummer traegt den Wert als Anschlag
 
 # Reihenfolge wie im Plugin (Source/core/Layout.h), Index = Reglernummer
 ORDER = ["trackL", "trackR", "cycle", "set", "markL", "markR", "rew", "ff", "stop", "play", "rec"]

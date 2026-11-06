@@ -64,7 +64,7 @@ check((0xB0, 32, 127) in out, "S1 leuchtet")
 links[md.EncodeRemoteControlID(10, 0, 16)] = 999
 e = Ev(16, 100); dev.OnMidiMsg(e)
 check(e.handled and not any(r[0] == 999 for r in rec), "alter Kanal-1-Link wirkt nicht auf freien Regler")
-check((3, 70 + dev.INDEX["knob1"], 1 + 100 * 126 // 127) in notes, "Wert geht als Note ans Plugin")
+check((3, 0 + dev.INDEX["knob1"], 1 + 100 * 126 // 127) in notes, "Wert geht als Note ans Plugin")
 
 # Lernen in Preset 1: Kick-Lautstaerke (Event 501) mit Drehregler 1
 lastTweaked[0] = 501; values[LEARN] = 1.0

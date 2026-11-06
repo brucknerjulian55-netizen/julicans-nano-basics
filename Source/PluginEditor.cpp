@@ -409,7 +409,7 @@ public:
             else if (const auto* smp = p.sampleAt (p.bankFor (i), i))
             {
                 const int note = triggerNote (i);
-                text = U ("Sound: ") + smp->name + U ("\n") + smp->path + U ("\nIm Piano Roll auf ") + juce::MidiMessage::getMidiNoteName (note, true, true, 3) + U (" spielbar.");
+                text = U ("Sound: ") + smp->name + U ("\n") + smp->path + U ("\nSteps und Piano Roll: ") + juce::MidiMessage::getMidiNoteName (note, true, true, 5) + U (" spielbar.");
             }
             else if (locked) text = U ("Fest: In FL Rechtsklick auf den Zielregler, Link to controller, dann diesen Regler bewegen.");
             else text = U ("In diesem Preset frei. Verknüpfen: Lernen drücken, in FL den Zielregler mit der Maus bewegen, dann diesen Regler am Korg.")

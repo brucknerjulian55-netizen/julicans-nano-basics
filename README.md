@@ -8,7 +8,7 @@ Das Plugin ist ein Instrument im Channel Rack. Das mitgelieferte FL-Skript liest
 
 - **Feste Regler** laufen ganz normal durch FL. Du verknüpfst sie wie immer mit Rechtsklick › Link to controller.
 - **Alle anderen Regler** führt das Skript selbst aus, für jedes Preset getrennt. Verknüpft wird mit **Lernen**: Knopf im Plugin drücken, in FL den Zielregler mit der Maus bewegen, dann den Regler am Korg. Das braucht FL Studio 21 oder neuer.
-- **Sounds:** Zieh ein Sample aus dem FL-Browser auf eine Taste (S, M, R, Cycle, Marker, Transport). Sie spielt es in diesem Preset ab. Gespeichert wird nur der Pfad, relativ zu deinem Sample-Ordner. Im Piano Roll spielen C1 bis G1 die S-Tasten, G#1 bis D#2 die M-Tasten, E2 bis B2 die R-Tasten und C3 bis G#3 Cycle bis Rec.
+- **Sounds:** Zieh ein Sample aus dem FL-Browser auf eine Taste (S, M, R, Cycle, Marker, Transport). Sie spielt es in diesem Preset ab. Gespeichert wird nur der Pfad, relativ zu deinem Sample-Ordner. Steps und Piano Roll spielen die Sounds mit: C5 (der normale Step-Ton) bis G5 sind S 1 bis 8, G#5 bis D#6 die M-Tasten, E6 bis B6 die R-Tasten, C7 bis G#7 Cycle bis Rec. Die ganz tiefen Noten unter D#3 sind für die Verbindung zum Korg reserviert.
 - **Speichern und Laden** sichert alle 8 Presets mit Namen, festen Reglern und Sound-Pfaden als `.nano`-Datei. In einem leeren Projekt lädst du sie, und die Sounds kommen aus deinem Ordner zurück.
 - Track ◄ und ► schalten die Presets um, die S-Taste mit der Nummer des Presets leuchtet.
 
