@@ -15,6 +15,7 @@ struct LedDef { const char* name; juce::uint32 c; };
 static const LedDef leds[8] = { { "Rot (Original)", 0xffff2a1a }, { "Lila", 0xffb04dff }, { "Cyan", 0xff00e8ff }, { "Grün", 0xff4dff6a },
                                 { "Orange", 0xffff8a1a }, { "Pink", 0xffff2e9a }, { "Weiß", 0xfff2f2f5 }, { "Gold", 0xffffc23d } };
 static Colour ledColour (const NanoProcessor& p) { return Colour (leds[juce::jlimit (0, 7, p.ledColour)].c); }
+static Colour soundColour (const NanoProcessor& p) { return Colour (leds[juce::jlimit (0, 7, p.soundColour)].c); }
 
 static void drawPanel (Graphics& g, Rectangle<float> r)
 {
@@ -149,20 +150,47 @@ public:
             }
             else
             {
-                const bool lit = c.led && ((i >= 0 && String (c.id) == "s" + String (pre + 1)) || p.held[(size_t) i].load() || (String (c.id) == "play" && p.playing.load()));
-                g.setColour (Colour (0xff050506)); g.fillRoundedRectangle (r.translated (0, 3.0f), 5.0f);
-                if (lit)
+                // Drei Zustaende: Preset-Anzeige (LED-Farbe), Sound belegt (Sound-Farbe), beides (geteilt). Gedrueckt leuchtet hell.
+                const bool presetLed = String (c.id) == "s" + String (pre + 1);
+                const int target = p.isLocked (i) ? 0 : p.targetOf (p.preset(), i);
+                const int state = target ? p.channelState[(size_t) i].load() : 0;
+                const bool waiting = state == 1 && std::fmod (ui.motion.time * 4.0f + (float) juce::Time::getMillisecondCounter() * 0.004f, 2.0f) < 1.0f;
+                const bool hasSound = p.sampleAt (p.bankFor (i), i) != nullptr || state == 2 || waiting;
+                const bool pressed = p.held[(size_t) i].load() || (String (c.id) == "play" && p.playing.load());
+                const Colour snd = soundColour (p);
+                const auto glow = [&] (Colour cc, float strength)
                 {
-                    for (int k = 4; k >= 1; --k) { g.setColour (led.withAlpha (0.07f * (float) k)); g.fillRoundedRectangle (r.expanded ((float) (5 - k) * 3.5f), 8.0f); }
-                    g.setColour (led); g.fillRoundedRectangle (r, 5.0f);
-                    g.setColour (Colour (0x80ffffff)); g.fillRoundedRectangle (r.withHeight (2.0f).reduced (3.0f, 0).translated (0, 1.0f), 1.0f);
+                    for (int k = 4; k >= 1; --k) { g.setColour (cc.withAlpha (strength * 0.07f * (float) k)); g.fillRoundedRectangle (r.expanded ((float) (5 - k) * 3.5f), 8.0f); }
+                };
+                g.setColour (Colour (0xff050506)); g.fillRoundedRectangle (r.translated (0, 3.0f), 5.0f);
+                if (pressed)
+                {
+                    const Colour cc = hasSound ? snd : led;
+                    glow (cc, 1.6f);
+                    g.setColour (cc.interpolatedWith (juce::Colours::white, 0.35f)); g.fillRoundedRectangle (r, 5.0f);
                 }
+                else if (presetLed && hasSound)
+                {
+                    glow (led, 0.8f); glow (snd, 0.6f);
+                    Graphics::ScopedSaveState ss (g);
+                    juce::Path clip; clip.addRoundedRectangle (r, 5.0f); g.reduceClipRegion (clip);
+                    g.setColour (led); g.fillRect (r);
+                    juce::Path half; half.addTriangle (r.getRight() + 1.0f, r.getY() - 1.0f, r.getRight() + 1.0f, r.getBottom() + 1.0f, r.getX() - 1.0f, r.getBottom() + 1.0f);
+                    g.setColour (snd); g.fillPath (half);
+                }
+                else if (presetLed) { glow (led, 1.0f); g.setColour (led); g.fillRoundedRectangle (r, 5.0f); }
+                else if (hasSound) { glow (snd, 0.55f); g.setColour (snd.withMultipliedBrightness (0.85f)); g.fillRoundedRectangle (r, 5.0f); }
                 else
                 {
                     g.setGradientFill (juce::ColourGradient (Colour (0xff2d2d33), r.getX(), r.getY(), Colour (0xff1d1d22), r.getX(), r.getBottom(), false));
                     g.fillRoundedRectangle (r, 5.0f);
                     g.setColour (Colour (0x1affffff)); g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
                 }
+                if (pressed || presetLed || hasSound)
+                {
+                    g.setColour (Colour (0x80ffffff)); g.fillRoundedRectangle (r.withHeight (2.0f).reduced (3.0f, 0).translated (0, 1.0f), 1.0f);
+                }
+                if (target && state == 0) { g.setColour (snd); g.drawRoundedRectangle (r.reduced (1.0f), 5.0f, 2.0f); }     // belegt, gerade stumm
             }
             // Markierungen
             const bool locked = p.isLocked (i);
@@ -184,12 +212,6 @@ public:
                 g.setColour (col::bg);
                 g.fillRoundedRectangle (b.withSizeKeepingCentre (8.0f, 6.0f).translated (0, 1.5f), 1.0f);
                 g.drawEllipse (b.withSizeKeepingCentre (5.0f, 6.0f).translated (0, -1.5f), 1.4f);
-            }
-            if (c.kind == BUTTON && p.sampleAt (p.bankFor (i), i) != nullptr)
-            {
-                const auto d = Rectangle<float> (7.0f, 7.0f).withCentre ({ r.getX() + 1.0f, r.getY() + 1.0f });
-                g.setColour (col::bg); g.fillEllipse (d.expanded (1.5f));
-                g.setColour (col::acc); g.fillEllipse (d);
             }
             if (dropTarget == i) { g.setColour (col::acc); g.drawRoundedRectangle (r.expanded (6.0f), 7.0f, 2.5f); }
             if (ui.selected == i) { g.setColour (col::ink); g.drawRoundedRectangle (r.expanded (5.0f), 7.0f, 2.0f); }
@@ -334,21 +356,29 @@ class LedPanel : public juce::Component
 {
 public:
     explicit LedPanel (NanoEditor::Ui& u) : ui (u) {}
-    Rectangle<float> swatch (int i) const { return { 16.0f + (float) (i % 4) * 44.0f, 48.0f + (float) (i / 4) * 44.0f, 32.0f, 32.0f }; }
-    Rectangle<float> toggle (int i) const { return { 16.0f, 202.0f + (float) i * 32.0f, (float) getWidth() - 32.0f, 26.0f }; }
+    Rectangle<float> swatch (int row, int i) const { return { 16.0f + (float) i * 27.0f, (row == 0 ? 66.0f : 124.0f), 21.0f, 21.0f }; }
+    Rectangle<float> toggle (int i) const { return { 16.0f, 196.0f + (float) i * 30.0f, (float) getWidth() - 32.0f, 26.0f }; }
     void paint (Graphics& g) override
     {
         drawPanel (g, getLocalBounds().toFloat());
-        g.setColour (col::ink); g.setFont (font (15.0f, true)); g.drawText ("LED-Farbe", 16, 14, 200, 22, juce::Justification::centredLeft, false);
-        for (int i = 0; i < 8; ++i)
-        {
-            const auto r = swatch (i);
-            g.setColour (Colour (leds[i].c)); g.fillEllipse (r);
-            g.setColour (i == ui.p.ledColour ? col::ink : Colour (0xff2c2c33)); g.drawEllipse (r.expanded (2.0f), 2.0f);
-        }
+        g.setColour (col::ink); g.setFont (font (15.0f, true)); g.drawText ("Farben", 16, 14, 200, 22, juce::Justification::centredLeft, false);
+        g.setColour (col::soft); g.setFont (font (12.5f));
+        g.drawText (U ("Aktives Preset"), 16, 44, 220, 18, juce::Justification::centredLeft, false);
+        g.drawText (U ("Taste mit Sound"), 16, 102, 220, 18, juce::Justification::centredLeft, false);
+        for (int row = 0; row < 2; ++row)
+            for (int i = 0; i < 8; ++i)
+            {
+                const auto r = swatch (row, i);
+                g.setColour (Colour (leds[i].c)); g.fillEllipse (r);
+                g.setColour (i == (row == 0 ? ui.p.ledColour : ui.p.soundColour) ? col::ink : Colour (0xff2c2c33)); g.drawEllipse (r.expanded (2.0f), 2.0f);
+            }
         g.setColour (col::dim); g.setFont (font (12.0f));
-        g.drawFittedText (U (leds[juce::jlimit (0, 7, ui.p.ledColour)].name) + U (" gilt nur im Plugin. Die LEDs am Korg bleiben rot, das ist fest verbaut."),
-                          16, 140, getWidth() - 32, 54, juce::Justification::topLeft, 3, 0.9f);
+        g.drawFittedText (U ("Beides auf einer Taste: geteilt. Gedrückt: hell. Gilt nur im Plugin, am Korg bleibt alles rot."),
+                          16, 156, getWidth() - 32, 40, juce::Justification::topLeft, 3, 0.9f);
+        {
+            static const char* q[3] = { "Einsetzen: sofort", "Einsetzen: nächster Schlag", "Einsetzen: nächster Takt" };
+            pill (g, toggle (3), U (q[juce::jlimit (0, 2, ui.p.quantise())]), false, 12.5f);
+        }
         const String names[3] = { U ("Reagiert auf Musik"), U ("Takt-Vorschau 180 BPM"), U ("Sparmodus") };
         const bool on[3] = { ui.p.reactive, ui.preview, ui.p.ecoMode };
         for (int i = 0; i < 3; ++i)
@@ -364,7 +394,10 @@ public:
     }
     void mouseDown (const juce::MouseEvent& e) override
     {
-        for (int i = 0; i < 8; ++i) if (swatch (i).expanded (4.0f).contains (e.position)) { ui.p.ledColour = i; if (ui.refresh) ui.refresh(); return; }
+        for (int row = 0; row < 2; ++row)
+            for (int i = 0; i < 8; ++i)
+                if (swatch (row, i).expanded (3.0f).contains (e.position)) { (row == 0 ? ui.p.ledColour : ui.p.soundColour) = i; if (ui.refresh) ui.refresh(); return; }
+        if (toggle (3).contains (e.position)) { ui.p.setQuantise ((ui.p.quantise() + 1) % 3); repaint(); return; }
         if (toggle (0).contains (e.position)) ui.p.reactive = ! ui.p.reactive;
         else if (toggle (1).contains (e.position)) ui.preview = ! ui.preview;
         else if (toggle (2).contains (e.position)) ui.p.ecoMode = ! ui.p.ecoMode;
@@ -405,7 +438,16 @@ public:
             const auto& c = controls()[(size_t) i];
             const bool locked = p.isLocked (i);
             head = U (c.label) + (c.reserved ? U (" · schaltet Presets") : locked ? U (" · fest") : U (" · Preset ") + String (p.preset() + 1));
-            if (c.reserved) text = U ("Track zurück und vor wechseln das Preset. Die S-Taste mit der Nummer des Presets leuchtet am Korg.");
+            const int target = locked ? 0 : p.targetOf (p.preset(), i);
+            if (c.reserved) text = String (c.id) == "set" ? U ("SET halten und eine Taste drücken: Die Taste schaltet ab dann den Kanal, der im Channel Rack angeklickt ist. Im Mixer-Fenster die gewählte Mixer-Spur.")
+                                                          : U ("Track zurück und vor wechseln das Preset. Die S-Taste mit der Nummer des Presets leuchtet am Korg.");
+            else if (target)
+            {
+                const int st = p.channelState[(size_t) i].load();
+                text = (target >= TARGET_MIXER ? U ("Schaltet Mixer-Spur ") + String (target - TARGET_MIXER) : U ("Schaltet Kanal ") + String (target) + U (" im Channel Rack (von oben gezählt)"))
+                     + U (", gerade ") + (st == 2 ? U ("an") : st == 1 ? U ("wartet auf den Einsatz") : U ("stumm"))
+                     + U (".\nAm Korg drücken schaltet an und aus. Neu zuweisen: anderen Kanal anklicken, SET halten, Taste drücken.");
+            }
             else if (const auto* smp = p.sampleAt (p.bankFor (i), i))
             {
                 const int note = triggerNote (i);
@@ -424,6 +466,7 @@ public:
             const bool has = p.sampleAt (p.bankFor (i), i) != nullptr;
             pill (g, button (0, 0), has ? U ("Sample tauschen") : U ("Sample wählen"), false, 12.5f);
             if (has) pill (g, button (0, 1), U ("Entfernen"), false, 12.5f);
+            else if (p.targetOf (p.preset(), i) != 0 && ! p.isLocked (i)) pill (g, button (0, 1), U ("Kanal lösen"), false, 12.5f);
         }
         pill (g, button (1, 0), p.learning() ? U ("Lernen läuft") : U ("Lernen"), p.learning(), 12.5f);
         pill (g, button (1, 1), U ("Einrichtung"), false, 12.5f);
@@ -441,7 +484,11 @@ public:
             else if (isButton() && chooseSample) { chooseSample (ui.selected); return; }
             else return;
         }
-        else if (button (0, 1).contains (e.position) && ui.mode == 0 && isButton()) p.clearSample (p.bankFor (ui.selected), ui.selected);
+        else if (button (0, 1).contains (e.position) && ui.mode == 0 && isButton())
+        {
+            if (p.sampleAt (p.bankFor (ui.selected), ui.selected) != nullptr) p.clearSample (p.bankFor (ui.selected), ui.selected);
+            else p.setTarget (p.preset(), ui.selected, 0);
+        }
         else return;
         if (ui.refresh) ui.refresh();
     }
@@ -451,6 +498,7 @@ public:
             U ("1. Korg Kontrol Editor: CC-Modus, LED Mode External.\n"
                "2. FL: Optionen > MIDI. Beim nanoKONTROL2 unter Eingang den Controller-Typ \"julicans nano basics\" wählen und einen Port setzen, zum Beispiel 10. Unter Ausgang den nanoKONTROL2 auf denselben Port.\n"
                "3. Dieses Plugin als Instrument in den Channel Rack laden. Das Skript findet es von selbst.\n\n"
+               "Kanäle auf Tasten: Kanal im Channel Rack anklicken, am Korg SET halten und die Taste drücken. Danach schaltet die Taste diesen Kanal in diesem Preset an und aus.\n"
                "Freie Regler verknüpfen: Lernen drücken, in FL den Zielregler mit der Maus bewegen, dann den Regler am Korg. Das gilt nur für das aktuelle Preset.\n"
                "Feste Regler: wie gewohnt mit Rechtsklick > Link to controller.\n"
                "Sounds: Sample aus dem FL-Browser auf eine Taste ziehen. Gespeichert wird nur der Pfad im Sample-Ordner."), "OK", this);
@@ -468,7 +516,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override { for (int i = 0; i < 3; ++i) if (button (i).contains (e.position) && onButton) onButton (i); }
     void paint (Graphics& g) override
     {
-        pill (g, button (0), U ("Speichern"), false, 12.5f); pill (g, button (1), U ("Laden"), false, 12.5f); pill (g, button (2), U ("Sample-Ordner"), false, 12.5f);
+        pill (g, button (0), U ("Speichern"), false, 12.5f); pill (g, button (1), U ("Laden"), false, 12.5f); pill (g, button (2), U ("Ordner"), false, 12.5f);
         const double since = juce::Time::getMillisecondCounterHiRes() - ui.p.lastMidiTime.load();
         const bool live = ui.p.lastMidiTime.load() > 0 && since < 4000.0;
         g.setColour (live ? Colour (0xff4dff6a) : col::dim); g.fillEllipse (button (0).getX() - 150.0f, 18.0f, 9.0f, 9.0f);
@@ -496,7 +544,7 @@ public:
         for (auto* c : std::initializer_list<juce::Component*> { &header, &presets, &korg, &design, &led, &edit }) addAndMakeVisible (c);
         update.fill = [] { return col::acc; }; update.text = [] { return col::bg; };
         addChildComponent (update);
-        header.onButton = [this] (int b) { b == 0 ? saveSet() : b == 1 ? loadSet() : chooseRoot(); };
+        header.onButton = [this] (int b) { b == 0 ? saveMenu() : b == 1 ? loadMenu() : folderMenu(); };
         edit.chooseSample = [this] (int ctl) { chooseSample (ctl); };
         korg.onClick = [this] (int i)
         {
@@ -528,25 +576,79 @@ public:
     {
         String err;
         if (! ui.p.loadSample (ui.p.bankFor (ctl), ctl, f, err)) message (err);
-        else if (! ui.p.sampleRoot.isDirectory()) message (U ("Gespeichert wird der volle Pfad. Wähle oben den Sample-Ordner, dann findet das Plugin die Sounds auch, wenn du sie innerhalb des Ordners verschiebst."));
+        else if (ui.p.searchFolders.isEmpty()) message (U ("Tipp: Trag oben unter Ordner deine Sample-Ordner aus dem FL-Browser ein. Dann findet das Plugin fehlende Sounds automatisch wieder."));
         ui.selected = ctl; ui.mode = 0;
         repaintAll();
     }
     void message (const String& t) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "julicans nano basics", t, "OK", this); }
     void chooseSample (int ctl)
     {
-        chooser = std::make_unique<juce::FileChooser> (U ("Sample für ") + U (controls()[(size_t) ctl].label), ui.p.sampleRoot, "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+        chooser = std::make_unique<juce::FileChooser> (U ("Sample für ") + U (controls()[(size_t) ctl].label), ui.p.sampleRoot(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [sp = SafePointer<Root> (this), ctl] (const juce::FileChooser& c)
         { if (sp != nullptr && c.getResult().existsAsFile()) sp->assign (ctl, c.getResult()); });
     }
-    void chooseRoot()
+    void folderMenu()
     {
-        chooser = std::make_unique<juce::FileChooser> (U ("Sample-Ordner wählen, zum Beispiel deinen FL-Browser-Ordner"), ui.p.sampleRoot);
+        juce::PopupMenu m;
+        m.addSectionHeader (U ("Suchordner (wie im FL-Browser)"));
+        for (int i = 0; i < ui.p.searchFolders.size(); ++i)
+        {
+            juce::PopupMenu sub; sub.addItem (100 + i, U ("Entfernen"));
+            m.addSubMenu (ui.p.searchFolders[i].getFullPathName(), sub);
+        }
+        if (ui.p.searchFolders.isEmpty()) m.addItem (-1, U ("Noch keiner eingetragen"), false);
+        m.addSeparator();
+        m.addItem (1, U ("Ordner hinzufügen …"));
+        m.addItem (2, U ("Fehlende Sounds suchen") + (ui.p.missing.empty() ? String() : U (" (") + String ((int) ui.p.missing.size()) + U (" fehlen)")), ! ui.p.missing.empty());
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (header.localAreaToGlobal (header.button (2).toNearestInt())), [sp = SafePointer<Root> (this)] (int r)
+        {
+            if (sp == nullptr || r <= 0) return;
+            if (r == 1) sp->addFolder();
+            else if (r == 2) sp->searchMissing();
+            else if (r >= 100) sp->ui.p.removeSearchFolder (r - 100);
+        });
+    }
+    void addFolder()
+    {
+        chooser = std::make_unique<juce::FileChooser> (U ("Sample-Ordner aus deinem FL-Browser wählen"), ui.p.sampleRoot());
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [sp = SafePointer<Root> (this)] (const juce::FileChooser& c)
         {
             if (sp == nullptr || ! c.getResult().isDirectory()) return;
-            sp->ui.p.setSampleRoot (c.getResult());
-            sp->message (U ("Sample-Ordner: ") + c.getResult().getFullPathName() + U ("\nNeue Sounds werden ab jetzt relativ zu diesem Ordner gespeichert."));
+            sp->ui.p.addSearchFolder (c.getResult());
+            if (! sp->ui.p.missing.empty()) sp->searchMissing();
+            else sp->message (U ("Suchordner hinzugefügt: ") + c.getResult().getFullPathName());
+        });
+    }
+    void searchMissing()
+    {
+        const int found = ui.p.findMissing();
+        repaintAll();
+        if (ui.p.missing.empty()) message (String (found) + U (" Sound(s) gefunden und geladen. Es fehlt nichts mehr."));
+        else { message (String (found) + U (" gefunden.")); reportMissing(); }
+    }
+    void saveMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, U ("Als Datei speichern …"));
+        m.addItem (2, U ("Als Standard für neue Plugins"));
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (header.localAreaToGlobal (header.button (0).toNearestInt())), [sp = SafePointer<Root> (this)] (int r)
+        {
+            if (sp == nullptr) return;
+            if (r == 1) sp->saveSet();
+            if (r == 2) sp->message (sp->ui.p.saveDefault() ? U ("Gespeichert. Jedes neu geladene julicans nano basics startet ab jetzt mit diesen 8 Presets und Sounds, auch in einem leeren Projekt.")
+                                                           : U ("Speichern ist fehlgeschlagen."));
+        });
+    }
+    void loadMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, U ("Datei laden …"));
+        m.addItem (2, U ("Standard laden"), ui.p.defaultSetFile().existsAsFile());
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (header.localAreaToGlobal (header.button (1).toNearestInt())), [sp = SafePointer<Root> (this)] (int r)
+        {
+            if (sp == nullptr) return;
+            if (r == 1) sp->loadSet();
+            if (r == 2) { sp->ui.p.loadSet (sp->ui.p.defaultSetFile()); if (sp->ui.skinChanged) sp->ui.skinChanged(); sp->reportMissing(); }
         });
     }
     void saveSet()
@@ -572,9 +674,10 @@ public:
     }
     void reportMissing()
     {
-        if (ui.p.missing.isEmpty()) return;
-        juce::StringArray m (ui.p.missing); while (m.size() > 8) m.remove (8);
-        message (String (ui.p.missing.size()) + U (" Sound(s) nicht gefunden. Prüf den Sample-Ordner:\n") + m.joinIntoString ("\n"));
+        if (ui.p.missing.empty()) return;
+        juce::StringArray m; for (const auto& x : ui.p.missing) if (m.size() < 8) m.add (x.path);
+        message (String ((int) ui.p.missing.size()) + U (" Sound(s) nicht gefunden:\n") + m.joinIntoString ("\n")
+                 + U ("\n\nTrag oben unter Ordner die Sample-Ordner aus deinem FL-Browser ein. Dann sucht das Plugin dort automatisch nach diesen Dateien."));
     }
     void resized() override
     {

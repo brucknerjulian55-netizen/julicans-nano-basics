@@ -4,10 +4,11 @@
 #include "core/Layout.h"
 #include <array>
 #include <atomic>
+#include <map>
 
 /** Instrument im Channel Rack. Zeigt den Korg, haelt die Presets und spielt pro Taste und Preset ein Sample.
     Das FL-Skript schickt jede Bewegung als Note, liest Preset, Fest und Lernen und fuehrt die Verknuepfungen aus. */
-class NanoProcessor : public juce::AudioProcessor
+class NanoProcessor : public juce::AudioProcessor, private juce::AsyncUpdater
 {
 public:
     NanoProcessor();
@@ -42,6 +43,17 @@ public:
     bool learning() const { return learnParam->load() > 0.5f; }
     void setLearning (bool on);
     int bankFor (int ctl) const { return isLocked (ctl) ? nb::FIXED_BANK : preset(); }
+    /** Kanal oder Mixer-Spur, die eine Taste im Preset schaltet. 0 = keine. Das Skript schreibt diese Parameter. */
+    int targetOf (int presetIndex, int ctl) const
+    {
+        const int k = nb::soundButtonIndex (ctl);
+        return k < 0 ? 0 : (int) targetParams[(size_t) presetIndex][(size_t) k]->load();
+    }
+    void setTarget (int presetIndex, int ctl, int code);
+    int quantise() const { return (int) quantParam->load(); }
+    void setQuantise (int q);
+    // Zustand der geschalteten Kanaele im aktuellen Preset: 0 aus, 1 wartet auf den Schlag, 2 an
+    std::array<std::atomic<int>, nb::NUM_CTL> channelState;
 
     // Live-Werte vom Korg, je Preset und eine Bank fuer feste Regler
     std::array<std::array<std::atomic<float>, nb::NUM_CTL>, nb::NUM_BANKS> values;
@@ -61,11 +73,20 @@ public:
     std::atomic<int> lastPlayed { -1 };
 
     // Sample-Ordner: Pfade darunter werden relativ gespeichert und beim Laden dort gesucht
-    juce::File sampleRoot;
-    void setSampleRoot (const juce::File& f);
+    // Suchordner: am besten dieselben wie links im FL-Browser. Fehlende Sounds werden dort nach Namen gesucht.
+    juce::Array<juce::File> searchFolders;
+    juce::File sampleRoot() const { return searchFolders.isEmpty() ? juce::File() : searchFolders[0]; }
+    void addSearchFolder (const juce::File& f);
+    void removeSearchFolder (int i);
     juce::String storePath (const juce::File& f) const;
-    juce::File resolvePath (const juce::String& stored) const;
-    juce::Array<juce::String> missing;      // Dateien, die beim letzten Laden fehlten
+    juce::File resolvePath (const juce::String& stored);
+    struct Missing { int bank, ctl; juce::String path; };
+    std::vector<Missing> missing;            // Sounds, die beim letzten Laden fehlten
+    int findMissing();                       // sucht erneut in allen Ordnern, gibt die Zahl der gefundenen zurueck
+
+    // Standard: wird in jedes neue, leere Plugin geladen
+    juce::File defaultSetFile() const { return appFolder().getChildFile ("Standard.nano"); }
+    bool saveDefault() { return saveSet (defaultSetFile()); }
 
     // Sammlung aller 8 Presets als Datei
     juce::File setFolder() const;
@@ -81,7 +102,7 @@ public:
     // Einstellungen, nur im Nachrichten-Thread benutzt
     std::array<juce::String, nb::NUM_PRESETS> presetNames;
     juce::String skin { "dm_klassisch" };
-    int ledColour = 0;
+    int ledColour = 0, soundColour = 2;
     bool reactive = true, ecoMode = false;
 
 private:
@@ -93,8 +114,12 @@ private:
     void trigger (int bank, int ctl, float gain);
     void render (juce::AudioBuffer<float>& out, int from, int to);
     static juce::File appFolder();
+    void handleAsyncUpdate() override;
+    void saveFolders() const;
+    std::map<juce::String, juce::File> nameIndex; bool indexBuilt = false; bool stateWasSet = false;
 
-    std::atomic<float>* presetParam = nullptr; std::atomic<float>* learnParam = nullptr;
+    std::atomic<float>* presetParam = nullptr; std::atomic<float>* learnParam = nullptr; std::atomic<float>* quantParam = nullptr;
+    std::array<std::array<std::atomic<float>*, nb::NUM_SOUND_BUTTONS>, nb::NUM_PRESETS> targetParams {};
     std::array<std::atomic<float>*, nb::NUM_CTL> lockParams {};
     std::array<std::array<std::atomic<const Sample*>, nb::NUM_CTL>, nb::NUM_BANKS> slots;
     std::vector<std::unique_ptr<Sample>> owned;

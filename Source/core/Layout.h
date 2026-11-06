@@ -32,7 +32,7 @@ inline const std::array<Ctl, NUM_CTL>& controls()
         add ({ "trackL", "Track zurück", BUTTON, -142.5f, 8.0f, 10.0f, 5.5f, 58, false, true });
         add ({ "trackR", "Track vor", BUTTON, -127.5f, 8.0f, 10.0f, 5.5f, 59, false, true });
         add ({ "cycle", "Cycle", BUTTON, -142.5f, -6.0f, 10.0f, 5.5f, 46, true, false });
-        add ({ "set", "Marker Set", BUTTON, -107.5f, -6.0f, 10.0f, 5.5f, 60, false, false });
+        add ({ "set", "Marker Set", BUTTON, -107.5f, -6.0f, 10.0f, 5.5f, 60, false, true });      // SET halten + Taste = Kanal zuweisen
         add ({ "markL", "Marker zurück", BUTTON, -93.5f, -6.0f, 10.0f, 5.5f, 61, false, false });
         add ({ "markR", "Marker vor", BUTTON, -79.5f, -6.0f, 10.0f, 5.5f, 62, false, false });
         static const char* tid[5] = { "rew", "ff", "stop", "play", "rec" };
@@ -99,10 +99,33 @@ inline int triggerNote (int ctl)
     if (c.cc >= 32 && c.cc < 40) return TRIGGER_BASE + c.cc - 32;
     if (c.cc >= 48 && c.cc < 56) return TRIGGER_BASE + 8 + c.cc - 48;
     if (c.cc >= 64 && c.cc < 72) return TRIGGER_BASE + 16 + c.cc - 64;
-    static const int order[9] = { 46, 60, 61, 62, 43, 44, 42, 41, 45 };
-    for (int i = 0; i < 9; ++i) if (order[i] == c.cc) return TRIGGER_BASE + 24 + i;
+    static const int order[8] = { 46, 61, 62, 43, 44, 42, 41, 45 };
+    for (int i = 0; i < 8; ++i) if (order[i] == c.cc) return TRIGGER_BASE + 24 + i;
     return -1;
 }
+
+/** Die 32 Tasten, die Sounds oder Kanaele schalten koennen, in fester Reihenfolge (wie im Skript). */
+constexpr int NUM_SOUND_BUTTONS = 32, STATE_NOTE_BASE = 93;
+inline int soundButtonIndex (int ctl)
+{
+    int k = 0;
+    for (int i = 0; i < NUM_CTL; ++i)
+    {
+        const auto& c = controls()[(std::size_t) i];
+        if (c.kind != BUTTON || c.reserved) continue;
+        if (i == ctl) return k;
+        ++k;
+    }
+    return -1;
+}
+inline int soundButtonControl (int k)
+{
+    for (int i = 0; i < NUM_CTL; ++i) if (soundButtonIndex (i) == k) return i;
+    return -1;
+}
+
+/** Ziel einer Taste: 0 = nichts, 1..1023 = Channel-Rack-Kanal (global, ab 1), 1024..2047 = Mixer-Spur. */
+constexpr int TARGET_MAX = 2047, TARGET_MIXER = 1024;
 inline int controlForNote (int note)
 {
     for (int i = 0; i < NUM_CTL; ++i) if (triggerNote (i) == note) return i;

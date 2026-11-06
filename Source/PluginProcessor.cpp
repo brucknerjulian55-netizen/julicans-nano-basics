@@ -18,6 +18,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout NanoProcessor::makeLayout()
     }
     // Lernen: Das Skript verknuepft die naechste Bewegung am Korg mit dem zuletzt bewegten FL-Regler
     l.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "learn", 1 }, "Lernen", false));
+    // Wann eine geschaltete Taste einsetzt
+    l.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "quant", 1 }, "Einsetzen",
+                                                         juce::StringArray { "Sofort", juce::String::fromUTF8 ("Nächster Schlag"), juce::String::fromUTF8 ("Nächster Takt") }, 1));
+    // Welche Taste in welchem Preset welchen Kanal schaltet. Das Skript traegt das ein, das Projekt speichert es.
+    for (int p = 0; p < NUM_PRESETS; ++p)
+        for (int k = 0; k < NUM_SOUND_BUTTONS; ++k)
+        {
+            const auto& c = controls()[(size_t) soundButtonControl (k)];
+            l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "t" + juce::String (p) + "_" + c.id, 1 },
+                                                              juce::String::fromUTF8 ("Ziel ") + juce::String::fromUTF8 (c.label) + " P" + juce::String (p + 1), 0, TARGET_MAX, 0));
+        }
     return l;
 }
 
@@ -35,6 +46,11 @@ NanoProcessor::NanoProcessor()
     formats.registerBasicFormats();
     presetParam = apvts.getRawParameterValue ("preset");
     learnParam = apvts.getRawParameterValue ("learn");
+    quantParam = apvts.getRawParameterValue ("quant");
+    for (int p = 0; p < NUM_PRESETS; ++p)
+        for (int k = 0; k < NUM_SOUND_BUTTONS; ++k)
+            targetParams[(size_t) p][(size_t) k] = apvts.getRawParameterValue ("t" + juce::String (p) + "_" + controls()[(size_t) soundButtonControl (k)].id);
+    for (auto& c : channelState) c.store (0);
     for (int i = 0; i < NUM_CTL; ++i)
         lockParams[(size_t) i] = controls()[(size_t) i].reserved ? nullptr : apvts.getRawParameterValue (juce::String ("lock_") + controls()[(size_t) i].id);
     for (int b = 0; b < NUM_BANKS; ++b)
@@ -46,9 +62,23 @@ NanoProcessor::NanoProcessor()
     for (auto& h : held) h.store (false);
     static const char* defNames[NUM_PRESETS] = { "Kicks A", "Kicks B", "Kick-Bass", "Drops", "Live FX", "Melo", "Frei", "Frei" };
     for (int i = 0; i < NUM_PRESETS; ++i) presetNames[(size_t) i] = defNames[i];
-    // Der Sample-Ordner gilt fuer alle Projekte
+    // Suchordner gelten fuer alle Projekte
     if (auto xml = juce::XmlDocument::parse (appFolder().getChildFile ("settings.xml")))
-        sampleRoot = juce::File (xml->getStringAttribute ("sampleRoot"));
+    {
+        if (xml->hasAttribute ("sampleRoot")) searchFolders.add (juce::File (xml->getStringAttribute ("sampleRoot")));
+        for (auto* f : xml->getChildWithTagNameIterator ("Folder"))
+        {
+            const juce::File d (f->getStringAttribute ("path"));
+            if (! searchFolders.contains (d)) searchFolders.add (d);
+        }
+    }
+    // Neues, leeres Plugin: nach dem Laden den Standard uebernehmen, falls FL keinen Projektzustand liefert
+    triggerAsyncUpdate();
+}
+
+void NanoProcessor::handleAsyncUpdate()
+{
+    if (! stateWasSet && defaultSetFile().existsAsFile()) loadSet (defaultSetFile());
 }
 NanoProcessor::~NanoProcessor()
 {
@@ -63,6 +93,18 @@ void NanoProcessor::setPreset (int p)
 void NanoProcessor::setLocked (int ctl, bool on)
 {
     if (auto* x = lockParameter (ctl)) { x->beginChangeGesture(); x->setValueNotifyingHost (on ? 1.0f : 0.0f); x->endChangeGesture(); }
+}
+void NanoProcessor::setTarget (int presetIndex, int ctl, int code)
+{
+    const int k = soundButtonIndex (ctl); if (k < 0) return;
+    auto* x = apvts.getParameter ("t" + juce::String (presetIndex) + "_" + controls()[(size_t) ctl].id);
+    x->beginChangeGesture(); x->setValueNotifyingHost (x->convertTo0to1 ((float) code)); x->endChangeGesture();
+    if (code == 0) channelState[(size_t) ctl].store (0);
+}
+void NanoProcessor::setQuantise (int q)
+{
+    auto* x = apvts.getParameter ("quant");
+    x->beginChangeGesture(); x->setValueNotifyingHost (x->convertTo0to1 ((float) juce::jlimit (0, 2, q))); x->endChangeGesture();
 }
 void NanoProcessor::setLearning (bool on)
 {
@@ -88,31 +130,60 @@ void NanoProcessor::prepareToPlay (double rate, int)
 }
 
 // ---------------- Samples ----------------------------------------------------
-void NanoProcessor::setSampleRoot (const juce::File& f)
+void NanoProcessor::saveFolders() const
 {
-    sampleRoot = f;
-    juce::XmlElement x ("NanoBasics"); x.setAttribute ("sampleRoot", f.getFullPathName());
+    juce::XmlElement x ("NanoBasics");
+    for (const auto& f : searchFolders) x.createNewChildElement ("Folder")->setAttribute ("path", f.getFullPathName());
     x.writeTo (appFolder().getChildFile ("settings.xml"));
+}
+void NanoProcessor::addSearchFolder (const juce::File& f)
+{
+    if (f.isDirectory() && ! searchFolders.contains (f)) { searchFolders.add (f); indexBuilt = false; saveFolders(); }
+}
+void NanoProcessor::removeSearchFolder (int i)
+{
+    if (i >= 0 && i < searchFolders.size()) { searchFolders.remove (i); indexBuilt = false; saveFolders(); }
 }
 juce::String NanoProcessor::storePath (const juce::File& f) const
 {
-    if (sampleRoot.isDirectory() && f.isAChildOf (sampleRoot)) return f.getRelativePathFrom (sampleRoot).replaceCharacter ('\\', '/');
+    for (const auto& d : searchFolders)
+        if (d.isDirectory() && f.isAChildOf (d)) return f.getRelativePathFrom (d).replaceCharacter ('\\', '/');
     return f.getFullPathName();
 }
-juce::File NanoProcessor::resolvePath (const juce::String& stored) const
+juce::File NanoProcessor::resolvePath (const juce::String& stored)
 {
     if (stored.isEmpty()) return {};
-    const bool absolute = juce::File::isAbsolutePath (stored);
-    juce::File f = absolute ? juce::File (stored) : (sampleRoot.isDirectory() ? sampleRoot.getChildFile (stored) : juce::File());
-    if (f.existsAsFile()) return f;
-    // Verschoben? Im Sample-Ordner nach dem Dateinamen suchen
-    if (sampleRoot.isDirectory())
+    if (juce::File::isAbsolutePath (stored) && juce::File (stored).existsAsFile()) return juce::File (stored);
+    if (! juce::File::isAbsolutePath (stored))
+        for (const auto& d : searchFolders)
+            if (const auto f = d.getChildFile (stored); f.existsAsFile()) return f;
+    // Verschoben oder anderer Rechner: in allen Suchordnern nach dem Dateinamen suchen. Das Verzeichnis wird einmal aufgebaut.
+    if (! indexBuilt)
     {
-        const auto name = stored.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false);
-        const auto hits = sampleRoot.findChildFiles (juce::File::findFiles, true, name);
-        if (! hits.isEmpty()) return hits[0];
+        nameIndex.clear();
+        for (const auto& d : searchFolders)
+            if (d.isDirectory())
+                for (const auto& f : d.findChildFiles (juce::File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3"))
+                    nameIndex.emplace (f.getFileName().toLowerCase(), f);
+        indexBuilt = true;
     }
-    return {};
+    const auto name = stored.replaceCharacter ('\\', '/').fromLastOccurrenceOf ("/", false, false).toLowerCase();
+    const auto it = nameIndex.find (name);
+    return it != nameIndex.end() && it->second.existsAsFile() ? it->second : juce::File();
+}
+int NanoProcessor::findMissing()
+{
+    indexBuilt = false;
+    int found = 0;
+    std::vector<Missing> still;
+    for (const auto& m : missing)
+    {
+        const auto f = resolvePath (m.path);
+        juce::String err;
+        if (f.existsAsFile() && loadSample (m.bank, m.ctl, f, err)) ++found; else still.push_back (m);
+    }
+    missing = still;
+    return found;
 }
 
 void NanoProcessor::installSample (int bank, int ctl, std::unique_ptr<Sample> s)
@@ -205,6 +276,11 @@ void NanoProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             const int note = msg.getNoteNumber();
             if (note >= VALUE_NOTE_BASE && note < VALUE_NOTE_BASE + NUM_CTL)
                 handleControl (note - VALUE_NOTE_BASE, valueFromVelocity (msg.getVelocity()), true);
+            else if (note >= STATE_NOTE_BASE && note < STATE_NOTE_BASE + NUM_SOUND_BUTTONS)
+            {
+                const int v = msg.getVelocity();
+                channelState[(size_t) soundButtonControl (note - STATE_NOTE_BASE)].store (v >= 100 ? 2 : v >= 32 ? 1 : 0);
+            }
             else if (const int ctl = controlForNote (note); ctl >= 0)
                 trigger (bankFor (ctl), ctl, msg.getFloatVelocity());
         }
@@ -250,7 +326,7 @@ juce::ValueTree NanoProcessor::settingsTree (bool withValues) const
 {
     juce::ValueTree s ("SETTINGS");
     for (int i = 0; i < NUM_PRESETS; ++i) s.setProperty ("name" + juce::String (i), presetNames[(size_t) i], nullptr);
-    s.setProperty ("skin", skin, nullptr); s.setProperty ("led", ledColour, nullptr);
+    s.setProperty ("skin", skin, nullptr); s.setProperty ("led", ledColour, nullptr); s.setProperty ("soundLed", soundColour, nullptr);
     s.setProperty ("reactive", reactive, nullptr); s.setProperty ("eco", ecoMode, nullptr);
     juce::StringArray locks;
     for (int i = 0; i < NUM_CTL; ++i) if (isLocked (i)) locks.add (controls()[(size_t) i].id);
@@ -276,7 +352,7 @@ juce::ValueTree NanoProcessor::settingsTree (bool withValues) const
 void NanoProcessor::applySettings (const juce::ValueTree& s, bool withValues)
 {
     for (int i = 0; i < NUM_PRESETS; ++i) presetNames[(size_t) i] = s.getProperty ("name" + juce::String (i), presetNames[(size_t) i]).toString();
-    skin = s.getProperty ("skin", skin).toString(); ledColour = (int) s.getProperty ("led", ledColour);
+    skin = s.getProperty ("skin", skin).toString(); ledColour = (int) s.getProperty ("led", ledColour); soundColour = (int) s.getProperty ("soundLed", soundColour);
     reactive = (bool) s.getProperty ("reactive", reactive); ecoMode = (bool) s.getProperty ("eco", ecoMode);
     if (withValues)
         for (int b = 0; b < NUM_BANKS; ++b)
@@ -284,7 +360,7 @@ void NanoProcessor::applySettings (const juce::ValueTree& s, bool withValues)
             const auto v = juce::StringArray::fromTokens (s.getProperty ("bank" + juce::String (b)).toString(), ",", "");
             for (int i = 0; i < juce::jmin (NUM_CTL, v.size()); ++i) values[(size_t) b][(size_t) i].store (juce::jlimit (0.0f, 1.0f, v[i].getFloatValue()));
         }
-    missing.clear();
+    missing.clear(); indexBuilt = false;
     for (int b = 0; b < NUM_BANKS; ++b) for (int i = 0; i < NUM_CTL; ++i) if (sampleAt (b, i) != nullptr) clearSample (b, i);
     for (auto x : s)
     {
@@ -296,7 +372,7 @@ void NanoProcessor::applySettings (const juce::ValueTree& s, bool withValues)
         const auto stored = x.getProperty ("path").toString();
         const auto f = resolvePath (stored);
         juce::String err;
-        if (! f.existsAsFile() || ! loadSample (b, ctl, f, err)) missing.add (stored);
+        if (! f.existsAsFile() || ! loadSample (b, ctl, f, err)) missing.push_back ({ b, ctl, stored });
     }
 }
 
@@ -312,6 +388,7 @@ void NanoProcessor::setStateInformation (const void* data, int size)
 {
     auto xml = getXmlFromBinary (data, size);
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType())) return;
+    stateWasSet = true;
     auto state = juce::ValueTree::fromXml (*xml);
     const auto s = state.getChildWithName ("SETTINGS");
     if (s.isValid()) state.removeChild (s, nullptr);

@@ -22,7 +22,7 @@ int main (int argc, char** argv)
         check (controlForCc (c.cc) == i, "CC-Zuordnung");
         reserved += c.reserved; leds += c.led;
     }
-    check (reserved == 2, "zwei Track-Tasten reserviert");
+    check (reserved == 3, "Track-Tasten und SET reserviert");
     std::printf ("%d Regler, %d mit LED, Standard fest: ", NUM_CTL, leds);
     for (int i = 0; i < NUM_CTL; ++i) if (lockedByDefault (i)) std::printf ("%s ", controls()[(size_t) i].id);
     std::printf ("\n");
@@ -30,7 +30,9 @@ int main (int argc, char** argv)
         std::set<int> notes; int buttons = 0;
         for (int i = 0; i < NUM_CTL; ++i)
             if (triggerNote (i) >= 0) { ++buttons; check (notes.insert (triggerNote (i)).second && controlForNote (triggerNote (i)) == i, "Noten eindeutig"); check (triggerNote (i) >= VALUE_NOTE_BASE + NUM_CTL && triggerNote (i) <= 127, "Noten getrennt vom Wertebereich"); }
-        check (buttons == 33, "33 Tasten mit Sound-Platz");
+        check (buttons == 32 && buttons == NUM_SOUND_BUTTONS, "32 Tasten mit Sound-Platz");
+        for (int k = 0; k < NUM_SOUND_BUTTONS; ++k) check (soundButtonIndex (soundButtonControl (k)) == k, "Tastenreihenfolge");
+        check (STATE_NOTE_BASE > triggerNote (controlForCc (45)) && STATE_NOTE_BASE + NUM_SOUND_BUTTONS - 1 <= 127, "Zustandsnoten frei");
         check (triggerNote (controlForCc (32)) == 60, "Step auf C5 spielt S 1");
         check (VALUE_NOTE_BASE + NUM_CTL - 1 <= 127, "Wertnoten passen");
         check (std::fabs (valueFromVelocity (127) - 1.0f) < 1e-6f && valueFromVelocity (1) == 0.0f, "Wert aus Anschlag");
