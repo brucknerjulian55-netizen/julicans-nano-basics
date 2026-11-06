@@ -32,4 +32,4 @@ Source: "build\NanoBasics_artefacts\Release\VST3\julicans nano basics.vst3\*"; D
 Source: "Script\device_julicans_nano_basics.py"; DestDir: "{userdocs}\Image-Line\FL Studio\Settings\Hardware\julicans nano basics"; Flags: ignoreversion
 
 [Messages]
-FinishedLabel=[name] ist installiert. Starte FL Studio neu und wähle in den MIDI-Einstellungen beim nanoKONTROL2 den Controller-Typ "julicans nano basics".
+FinishedLabel=[name] ist installiert. Starte FL Studio neu, such im Plugin-Manager nach neuen Plugins und lade es als Instrument in den Channel Rack. In den MIDI-Einstellungen beim nanoKONTROL2 den Controller-Typ "julicans nano basics" wählen.

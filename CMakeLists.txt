@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(NanoBasics VERSION 0.1.0 LANGUAGES C CXX)
+project(NanoBasics VERSION 0.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -17,12 +17,12 @@ juce_add_plugin(NanoBasics
     PRODUCT_NAME "julicans nano basics"
     COMPANY_NAME "Tekkbox"
     PLUGIN_MANUFACTURER_CODE Tkbx
-    PLUGIN_CODE Jnb1
+    PLUGIN_CODE Jnb2
     FORMATS VST3
-    IS_SYNTH FALSE
+    IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
-    VST3_CATEGORIES Fx Tools)
+    VST3_CATEGORIES Instrument Sampler)
 
 target_sources(NanoBasics PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp)
 target_include_directories(NanoBasics PRIVATE Source)
@@ -33,5 +33,5 @@ if(MSVC)
     target_compile_options(NanoBasics PRIVATE /utf-8)
 endif()
 target_link_libraries(NanoBasics PRIVATE
-    juce::juce_audio_utils
+    juce::juce_audio_utils juce::juce_audio_formats
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)

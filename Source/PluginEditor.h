@@ -29,7 +29,7 @@ private:
     Ui ui;
     std::unique_ptr<juce::Component> root;
     std::unique_ptr<juce::TooltipWindow> tips;
-    juce::uint32 seenMoves = 0, seenKicks = 0; int seenPreset = -1;
+    juce::uint32 seenMoves = 0, seenKicks = 0; int seenPreset = -1; bool seenLearn = false;
     double lastTick = 0, lastKickTime = -10, previewClock = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NanoEditor)
 };

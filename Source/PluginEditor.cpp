@@ -185,7 +185,21 @@ public:
                 g.fillRoundedRectangle (b.withSizeKeepingCentre (8.0f, 6.0f).translated (0, 1.5f), 1.0f);
                 g.drawEllipse (b.withSizeKeepingCentre (5.0f, 6.0f).translated (0, -1.5f), 1.4f);
             }
+            if (c.kind == BUTTON && p.sampleAt (p.bankFor (i), i) != nullptr)
+            {
+                const auto d = Rectangle<float> (7.0f, 7.0f).withCentre ({ r.getX() + 1.0f, r.getY() + 1.0f });
+                g.setColour (col::bg); g.fillEllipse (d.expanded (1.5f));
+                g.setColour (col::acc); g.fillEllipse (d);
+            }
+            if (dropTarget == i) { g.setColour (col::acc); g.drawRoundedRectangle (r.expanded (6.0f), 7.0f, 2.5f); }
             if (ui.selected == i) { g.setColour (col::ink); g.drawRoundedRectangle (r.expanded (5.0f), 7.0f, 2.0f); }
+        }
+        if (p.learning())
+        {
+            const auto bar = Rectangle<float> (body.getCentreX() - 300.0f, body.getBottom() + 18.0f, 600.0f, 26.0f);
+            g.setColour (col::acc); g.fillRoundedRectangle (bar, 8.0f);
+            g.setColour (col::bg); g.setFont (font (13.0f, true));
+            g.drawText (U ("Lernen: Erst in FL einen Regler mit der Maus bewegen, dann den Regler am Korg"), bar, juce::Justification::centred, false);
         }
         // Preset-Wechsel: kurzer Blitz
         if (ui.motion.flash > 0.01f) { g.setColour (led.withAlpha (0.18f * ui.motion.flash)); g.fillRoundedRectangle (body, 16.0f); }
@@ -210,6 +224,7 @@ public:
 
     NanoEditor::Ui& ui;
     Rectangle<float> body;
+    int dropTarget = -1;
 private:
     struct Star { float x, y, r, phase; };
     juce::Image skinImg; Field fieldA, fieldB; std::vector<Star> stars;
@@ -364,14 +379,17 @@ class EditPanel : public juce::Component
 {
 public:
     explicit EditPanel (NanoEditor::Ui& u) : ui (u) {}
+    std::function<void (int)> chooseSample;
     Rectangle<float> seg (int i) const { return { 16.0f + (float) i * 112.0f, 48.0f, 104.0f + (i == 1 ? 20.0f : 0.0f), 34.0f }; }
-    Rectangle<float> button (int i) const { return { 16.0f + (float) i * 150.0f, (float) getHeight() - 50.0f, 142.0f, 34.0f }; }
+    Rectangle<float> button (int row, int i) const { const float w = ((float) getWidth() - 32.0f - 8.0f) / 2.0f; return { 16.0f + (float) i * (w + 8.0f), (float) getHeight() - (row == 0 ? 92.0f : 50.0f), w, 34.0f }; }
+    bool isButton() const { return ui.selected >= 0 && controls()[(size_t) ui.selected].kind == BUTTON && ! controls()[(size_t) ui.selected].reserved; }
     void paint (Graphics& g) override
     {
         drawPanel (g, getLocalBounds().toFloat());
+        auto& p = ui.p;
         g.setColour (col::ink); g.setFont (font (15.0f, true)); g.drawText ("Bearbeiten", 16, 14, 200, 22, juce::Justification::centredLeft, false);
         pill (g, seg (0), "Belegen", ui.mode == 0); pill (g, seg (1), "Fest markieren", ui.mode == 1);
-        auto box = Rectangle<float> (16.0f, 94.0f, (float) getWidth() - 32.0f, 132.0f);
+        auto box = Rectangle<float> (16.0f, 94.0f, (float) getWidth() - 32.0f, (float) getHeight() - 200.0f);
         g.setColour (col::bg); g.fillRoundedRectangle (box, 10.0f);
         box.reduce (12.0f, 10.0f);
         String head, text;
@@ -379,46 +397,63 @@ public:
         if (ui.mode == 1)
         {
             head = U ("Fest markieren");
-            text = U ("Klick auf einen Regler schaltet fest an oder aus. Feste Regler machen in allen Presets dasselbe, zum Beispiel deine Effekte. Die Track-Tasten schalten die Presets um.");
+            text = U ("Klick auf einen Regler schaltet fest an oder aus. Feste Regler machen in allen Presets dasselbe, zum Beispiel deine Effekte. Sie verknüpfst du in FL ganz normal mit Link to controller.");
         }
-        else if (i < 0) { head = U ("Kein Regler gewählt"); text = U ("Klick einen Regler an, um zu sehen, wie er belegt ist. Doppelklick auf ein Preset benennt es um."); }
+        else if (i < 0) { head = U ("Kein Regler gewählt"); text = U ("Klick einen Regler an. Auf Tasten kannst du ein Sample aus dem FL-Browser ziehen. Doppelklick auf ein Preset benennt es um."); }
         else
         {
             const auto& c = controls()[(size_t) i];
-            const bool locked = ui.p.isLocked (i);
-            head = U (c.label) + (c.reserved ? U (" · schaltet Presets") : locked ? U (" · fest") : U (" · wechselt pro Preset"));
-            if (c.reserved) text = U ("Track zurück und vor wechseln das Preset. Die S-Taste des Kanals mit der Nummer des Presets leuchtet am Korg.");
-            else if (locked) text = U ("Bleibt in jedem Preset gleich verknüpft. In FL einmal verknüpfen, fertig.");
-            else text = U ("In ") + ui.p.presetNames[(size_t) ui.p.preset()] + U (" frei belegbar. In FL Rechtsklick auf den Zielregler, Link to controller, dann diesen Regler am Korg bewegen.");
+            const bool locked = p.isLocked (i);
+            head = U (c.label) + (c.reserved ? U (" · schaltet Presets") : locked ? U (" · fest") : U (" · Preset ") + String (p.preset() + 1));
+            if (c.reserved) text = U ("Track zurück und vor wechseln das Preset. Die S-Taste mit der Nummer des Presets leuchtet am Korg.");
+            else if (const auto* smp = p.sampleAt (p.bankFor (i), i))
+            {
+                const int note = triggerNote (i);
+                text = U ("Sound: ") + smp->name + U ("\n") + smp->path + U ("\nIm Piano Roll auf ") + juce::MidiMessage::getMidiNoteName (note, true, true, 3) + U (" spielbar.");
+            }
+            else if (locked) text = U ("Fest: In FL Rechtsklick auf den Zielregler, Link to controller, dann diesen Regler bewegen.");
+            else text = U ("In diesem Preset frei. Verknüpfen: Lernen drücken, in FL den Zielregler mit der Maus bewegen, dann diesen Regler am Korg.")
+                        + (c.kind == BUTTON ? U (" Oder ein Sample auf die Taste ziehen.") : String());
         }
         g.setColour (col::ink); g.setFont (font (14.0f, true)); g.drawText (head, box.removeFromTop (22.0f), juce::Justification::centredLeft, true);
-        g.setColour (col::soft); g.setFont (font (12.5f)); g.drawFittedText (text, box.toNearestInt(), juce::Justification::topLeft, 5, 0.9f);
+        g.setColour (col::soft); g.setFont (font (12.5f)); g.drawFittedText (text, box.toNearestInt(), juce::Justification::topLeft, 6, 0.9f);
 
-        const double since = juce::Time::getMillisecondCounterHiRes() - ui.p.lastMidiTime.load();
-        const bool live = ui.p.lastMidiTime.load() > 0 && since < 4000.0;
-        g.setColour (live ? Colour (0xff4dff6a) : col::dim); g.fillEllipse (16.0f, (float) getHeight() - 80.0f, 9.0f, 9.0f);
-        g.setColour (col::dim); g.setFont (font (12.0f));
-        g.drawText (live ? U ("Korg sendet") : ui.p.lastMidiTime.load() > 0 ? U ("Korg verbunden, gerade ruhig") : U ("Noch keine Daten vom Korg"), 32, getHeight() - 86, getWidth() - 48, 20, juce::Justification::centredLeft, false);
-        pill (g, button (0), U ("Alle lösen"), false, 12.5f); pill (g, button (1), U ("Einrichtung"), false, 12.5f);
+        if (ui.mode == 1) { pill (g, button (0, 0), U ("Alle lösen"), false, 12.5f); }
+        else if (isButton())
+        {
+            const bool has = p.sampleAt (p.bankFor (i), i) != nullptr;
+            pill (g, button (0, 0), has ? U ("Sample tauschen") : U ("Sample wählen"), false, 12.5f);
+            if (has) pill (g, button (0, 1), U ("Entfernen"), false, 12.5f);
+        }
+        pill (g, button (1, 0), p.learning() ? U ("Lernen läuft") : U ("Lernen"), p.learning(), 12.5f);
+        pill (g, button (1, 1), U ("Einrichtung"), false, 12.5f);
     }
     void mouseDown (const juce::MouseEvent& e) override
     {
+        auto& p = ui.p;
         if (seg (0).contains (e.position)) ui.mode = 0;
         else if (seg (1).contains (e.position)) ui.mode = 1;
-        else if (button (0).contains (e.position)) { for (int i = 0; i < NUM_CTL; ++i) if (! controls()[(size_t) i].reserved) ui.p.setLocked (i, false); }
-        else if (button (1).contains (e.position)) { showSetup(); return; }
+        else if (button (1, 0).contains (e.position)) p.setLearning (! p.learning());
+        else if (button (1, 1).contains (e.position)) { showSetup(); return; }
+        else if (button (0, 0).contains (e.position))
+        {
+            if (ui.mode == 1) { for (int i = 0; i < NUM_CTL; ++i) if (! controls()[(size_t) i].reserved) p.setLocked (i, false); }
+            else if (isButton() && chooseSample) { chooseSample (ui.selected); return; }
+            else return;
+        }
+        else if (button (0, 1).contains (e.position) && ui.mode == 0 && isButton()) p.clearSample (p.bankFor (ui.selected), ui.selected);
         else return;
         if (ui.refresh) ui.refresh();
     }
     void showSetup()
     {
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, U ("Einrichtung in FL Studio"),
-            U ("1. Optionen > MIDI-Einstellungen: nanoKONTROL2 als Eingang aktivieren, Controller-Typ \"julicans nano basics\", Port zum Beispiel 10.\n"
-               "2. Unten bei Ausgang ebenfalls nanoKONTROL2 aktivieren und denselben Port 10 setzen. Dann zeigt die S-Taste das Preset.\n"
-               "3. Dieses Plugin in einen Mixer-Slot laden, am besten auf den Master oder die Kick-Spur.\n"
-               "4. Im Plugin-Fenster oben links auf das Zahnrad, dann MIDI-Eingangsport ebenfalls auf 10. So sieht das Plugin die Regler.\n"
-               "5. Im Korg Kontrol Editor: CC-Modus, LED-Modus External.\n\n"
-               "Verknüpfen wie immer: Rechtsklick auf einen Regler in FL, Link to controller, Korg-Regler bewegen."), "OK", this);
+            U ("1. Korg Kontrol Editor: CC-Modus, LED Mode External.\n"
+               "2. FL: Optionen > MIDI. Beim nanoKONTROL2 unter Eingang den Controller-Typ \"julicans nano basics\" wählen und einen Port setzen, zum Beispiel 10. Unter Ausgang den nanoKONTROL2 auf denselben Port.\n"
+               "3. Dieses Plugin als Instrument in den Channel Rack laden. Das Skript findet es von selbst.\n\n"
+               "Freie Regler verknüpfen: Lernen drücken, in FL den Zielregler mit der Maus bewegen, dann den Regler am Korg. Das gilt nur für das aktuelle Preset.\n"
+               "Feste Regler: wie gewohnt mit Rechtsklick > Link to controller.\n"
+               "Sounds: Sample aus dem FL-Browser auf eine Taste ziehen. Gespeichert wird nur der Pfad im Sample-Ordner."), "OK", this);
     }
     NanoEditor::Ui& ui;
 };
@@ -428,22 +463,31 @@ class Header : public juce::Component
 {
 public:
     explicit Header (NanoEditor::Ui& u) : ui (u) {}
+    std::function<void (int)> onButton;
+    Rectangle<float> button (int i) const { static const float w[3] = { 104.0f, 92.0f, 132.0f }; float x = (float) getWidth(); for (int k = 2; k >= i; --k) x -= w[k] + 8.0f; return { x + 8.0f, 6.0f, w[i], 34.0f }; }
+    void mouseDown (const juce::MouseEvent& e) override { for (int i = 0; i < 3; ++i) if (button (i).contains (e.position) && onButton) onButton (i); }
     void paint (Graphics& g) override
     {
+        pill (g, button (0), U ("Speichern"), false, 12.5f); pill (g, button (1), U ("Laden"), false, 12.5f); pill (g, button (2), U ("Sample-Ordner"), false, 12.5f);
+        const double since = juce::Time::getMillisecondCounterHiRes() - ui.p.lastMidiTime.load();
+        const bool live = ui.p.lastMidiTime.load() > 0 && since < 4000.0;
+        g.setColour (live ? Colour (0xff4dff6a) : col::dim); g.fillEllipse (button (0).getX() - 150.0f, 18.0f, 9.0f, 9.0f);
+        g.setColour (col::dim); g.setFont (font (12.0f));
+        g.drawText (live ? U ("Korg sendet") : ui.p.lastMidiTime.load() > 0 ? U ("Korg verbunden") : U ("Noch keine Daten"), (int) button (0).getX() - 136, 12, 128, 20, juce::Justification::centredLeft, false);
         g.setColour (col::ink); g.setFont (font (26.0f, true));
-        g.drawText ("julicans nano basics", 0, 0, 500, 32, juce::Justification::centredLeft, false);
+        g.drawText ("julicans nano basics", 0, 0, 400, 32, juce::Justification::centredLeft, false);
         int fixed = 0, free = 0;
         for (int i = 0; i < NUM_CTL; ++i) { if (controls()[(size_t) i].reserved) continue; (ui.p.isLocked (i) ? fixed : free)++; }
         const int p = ui.p.preset();
         g.setColour (col::dim); g.setFont (font (13.0f));
         g.drawText (U ("Preset ") + String (p + 1) + U (" von 8 · ") + ui.p.presetNames[(size_t) p] + U (" · ") + String (free) + U (" Regler wechseln, ") + String (fixed) + U (" fest"),
-                    0, 34, 700, 18, juce::Justification::centredLeft, false);
+                    0, 34, 480, 18, juce::Justification::centredLeft, false);
     }
     NanoEditor::Ui& ui;
 };
 
 // ---------------- Gesamtfenster ---------------------------------------------
-class Root : public juce::Component
+class Root : public juce::Component, public juce::FileDragAndDropTarget
 {
 public:
     explicit Root (NanoEditor::Ui& u) : ui (u), header (u), presets (u), korg (u), design (u), led (u), edit (u),
@@ -452,6 +496,8 @@ public:
         for (auto* c : std::initializer_list<juce::Component*> { &header, &presets, &korg, &design, &led, &edit }) addAndMakeVisible (c);
         update.fill = [] { return col::acc; }; update.text = [] { return col::bg; };
         addChildComponent (update);
+        header.onButton = [this] (int b) { b == 0 ? saveSet() : b == 1 ? loadSet() : chooseRoot(); };
+        edit.chooseSample = [this] (int ctl) { chooseSample (ctl); };
         korg.onClick = [this] (int i)
         {
             const auto& c = controls()[(size_t) i];
@@ -462,10 +508,78 @@ public:
         setSize (1280, 820);
     }
     void paint (Graphics& g) override { g.fillAll (col::bg); }
+    static bool isAudio (const String& f) { return f.endsWithIgnoreCase (".wav") || f.endsWithIgnoreCase (".aif") || f.endsWithIgnoreCase (".aiff") || f.endsWithIgnoreCase (".flac") || f.endsWithIgnoreCase (".ogg") || f.endsWithIgnoreCase (".mp3"); }
+    bool isInterestedInFileDrag (const juce::StringArray& f) override { return f.size() > 0 && isAudio (f[0]); }
+    int buttonAt (int x, int y) const
+    {
+        const int i = korg.hit (korg.getLocalPoint (this, juce::Point<int> (x, y)).toFloat());
+        return i >= 0 && controls()[(size_t) i].kind == BUTTON && ! controls()[(size_t) i].reserved ? i : -1;
+    }
+    void fileDragMove (const juce::StringArray&, int x, int y) override { const int i = buttonAt (x, y); if (i != korg.dropTarget) { korg.dropTarget = i; korg.repaint(); } }
+    void fileDragExit (const juce::StringArray&) override { korg.dropTarget = -1; korg.repaint(); }
+    void filesDropped (const juce::StringArray& files, int x, int y) override
+    {
+        korg.dropTarget = -1;
+        const int i = buttonAt (x, y);
+        if (i < 0) { message (U ("Zieh das Sample direkt auf eine Taste: S, M, R, Cycle, Marker oder Transport.")); return; }
+        assign (i, juce::File (files[0]));
+    }
+    void assign (int ctl, const juce::File& f)
+    {
+        String err;
+        if (! ui.p.loadSample (ui.p.bankFor (ctl), ctl, f, err)) message (err);
+        else if (! ui.p.sampleRoot.isDirectory()) message (U ("Gespeichert wird der volle Pfad. Wähle oben den Sample-Ordner, dann findet das Plugin die Sounds auch, wenn du sie innerhalb des Ordners verschiebst."));
+        ui.selected = ctl; ui.mode = 0;
+        repaintAll();
+    }
+    void message (const String& t) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "julicans nano basics", t, "OK", this); }
+    void chooseSample (int ctl)
+    {
+        chooser = std::make_unique<juce::FileChooser> (U ("Sample für ") + U (controls()[(size_t) ctl].label), ui.p.sampleRoot, "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [sp = SafePointer<Root> (this), ctl] (const juce::FileChooser& c)
+        { if (sp != nullptr && c.getResult().existsAsFile()) sp->assign (ctl, c.getResult()); });
+    }
+    void chooseRoot()
+    {
+        chooser = std::make_unique<juce::FileChooser> (U ("Sample-Ordner wählen, zum Beispiel deinen FL-Browser-Ordner"), ui.p.sampleRoot);
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [sp = SafePointer<Root> (this)] (const juce::FileChooser& c)
+        {
+            if (sp == nullptr || ! c.getResult().isDirectory()) return;
+            sp->ui.p.setSampleRoot (c.getResult());
+            sp->message (U ("Sample-Ordner: ") + c.getResult().getFullPathName() + U ("\nNeue Sounds werden ab jetzt relativ zu diesem Ordner gespeichert."));
+        });
+    }
+    void saveSet()
+    {
+        chooser = std::make_unique<juce::FileChooser> (U ("Presets speichern"), ui.p.setFolder().getChildFile (ui.p.presetNames[0] + ".nano"), "*.nano");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [sp = SafePointer<Root> (this)] (const juce::FileChooser& c)
+        {
+            if (sp == nullptr || c.getResult() == juce::File()) return;
+            const auto f = c.getResult().withFileExtension ("nano");
+            sp->message (sp->ui.p.saveSet (f) ? U ("Gespeichert: ") + f.getFileName() + U ("\nAlle 8 Presets mit Namen, festen Reglern und den Pfaden der Sounds.") : U ("Speichern ist fehlgeschlagen."));
+        });
+    }
+    void loadSet()
+    {
+        chooser = std::make_unique<juce::FileChooser> (U ("Presets laden"), ui.p.setFolder(), "*.nano");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [sp = SafePointer<Root> (this)] (const juce::FileChooser& c)
+        {
+            if (sp == nullptr || ! c.getResult().existsAsFile()) return;
+            if (! sp->ui.p.loadSet (c.getResult())) { sp->message (U ("Das ist keine Preset-Datei von julicans nano basics.")); return; }
+            if (sp->ui.skinChanged) sp->ui.skinChanged();
+            sp->reportMissing();
+        });
+    }
+    void reportMissing()
+    {
+        if (ui.p.missing.isEmpty()) return;
+        juce::StringArray m (ui.p.missing); while (m.size() > 8) m.remove (8);
+        message (String (ui.p.missing.size()) + U (" Sound(s) nicht gefunden. Prüf den Sample-Ordner:\n") + m.joinIntoString ("\n"));
+    }
     void resized() override
     {
-        header.setBounds (32, 24, 900, 56);
-        update.setBounds (getWidth() - 232, 30, 200, 26);
+        header.setBounds (32, 24, 1216, 56);
+        update.setBounds (540, 30, 200, 26);
         presets.setBounds (32, 90, 1216, 50);
         korg.setBounds (32, 150, 1216, 312);
         design.setBounds (32, 474, 600, 322);
@@ -475,6 +589,7 @@ public:
     void repaintAll() { for (auto* c : getChildren()) c->repaint(); }
     NanoEditor::Ui& ui;
     Header header; PresetBar presets; KorgView korg; DesignPanel design; LedPanel led; EditPanel edit; tk::UpdateBanner update;
+    std::unique_ptr<juce::FileChooser> chooser;
 };
 
 // ---------------- Editor ------------------------------------------------------
@@ -495,6 +610,7 @@ NanoEditor::NanoEditor (NanoProcessor& p) : AudioProcessorEditor (p), proc (p), 
     lastTick = juce::Time::getMillisecondCounterHiRes();
     seenPreset = p.preset(); seenMoves = p.moveCount.load(); seenKicks = p.kicks.load();
     startTimerHz (30);
+    juce::MessageManager::callAsync ([sp = SafePointer<NanoEditor> (this)] { if (sp != nullptr) static_cast<Root*> (sp->root.get())->reportMissing(); });
 }
 NanoEditor::~NanoEditor() { stopTimer(); }
 
@@ -557,4 +673,6 @@ void NanoEditor::timerCallback()
     r->korg.repaint();
     static int slow = 0;
     if (++slow % 15 == 0) { r->edit.repaint(); r->header.repaint(); r->presets.repaint(); }
+    const bool learn = proc.learning();
+    if (learn != seenLearn) { seenLearn = learn; r->edit.repaint(); }
 }

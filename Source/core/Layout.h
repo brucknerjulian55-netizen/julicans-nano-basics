@@ -85,6 +85,28 @@ inline bool lockedByDefault (int i)
 /** Feste Regler senden auf MIDI-Kanal 1, Preset n auf Kanal n + 1. Das ist die ganze Umschalt-Logik. */
 inline int midiChannelFor (int preset, bool locked) { return locked ? 0 : preset + 1; }
 
+/** Das Skript schickt jede Bewegung als Note 70 + Reglernummer, der Anschlag traegt den Wert. */
+constexpr int VALUE_NOTE_BASE = 70;
+inline float valueFromVelocity (int vel) { return vel <= 1 ? 0.0f : (float) (vel - 1) / 126.0f; }
+
+/** Noten aus dem Piano Roll spielen die Sounds der Tasten: S 1-8 = C1 bis G1, M = G#1 bis D#2, R = E2 bis B2, dann Cycle bis Rec. */
+inline int triggerNote (int ctl)
+{
+    const auto& c = controls()[(std::size_t) ctl];
+    if (c.kind != BUTTON || c.reserved) return -1;
+    if (c.cc >= 32 && c.cc < 40) return 36 + c.cc - 32;
+    if (c.cc >= 48 && c.cc < 56) return 44 + c.cc - 48;
+    if (c.cc >= 64 && c.cc < 72) return 52 + c.cc - 64;
+    static const int order[9] = { 46, 60, 61, 62, 43, 44, 42, 41, 45 };
+    for (int i = 0; i < 9; ++i) if (order[i] == c.cc) return 60 + i;
+    return -1;
+}
+inline int controlForNote (int note)
+{
+    for (int i = 0; i < NUM_CTL; ++i) if (triggerNote (i) == note) return i;
+    return -1;
+}
+
 /** Gedruckte Beschriftung auf dem Geraet */
 struct Print { const char* text; float x, y, size; bool bold; bool centred; };
 inline const std::array<Print, 45>& prints()

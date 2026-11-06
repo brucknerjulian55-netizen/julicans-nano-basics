@@ -26,6 +26,17 @@ int main (int argc, char** argv)
     std::printf ("%d Regler, %d mit LED, Standard fest: ", NUM_CTL, leds);
     for (int i = 0; i < NUM_CTL; ++i) if (lockedByDefault (i)) std::printf ("%s ", controls()[(size_t) i].id);
     std::printf ("\n");
+    {
+        std::set<int> notes; int buttons = 0;
+        for (int i = 0; i < NUM_CTL; ++i)
+            if (triggerNote (i) >= 0) { ++buttons; check (notes.insert (triggerNote (i)).second && controlForNote (triggerNote (i)) == i, "Noten eindeutig"); check (triggerNote (i) < VALUE_NOTE_BASE, "Noten unter dem Wertebereich"); }
+        check (buttons == 33, "33 Tasten mit Sound-Platz");
+        check (VALUE_NOTE_BASE + NUM_CTL - 1 <= 127, "Wertnoten passen");
+        check (std::fabs (valueFromVelocity (127) - 1.0f) < 1e-6f && valueFromVelocity (1) == 0.0f, "Wert aus Anschlag");
+        std::printf ("Reihenfolge:");
+        for (int i = 0; i < NUM_CTL; ++i) std::printf (" %s", controls()[(size_t) i].id);
+        std::printf ("\n");
+    }
     check (midiChannelFor (0, true) == 0 && midiChannelFor (0, false) == 1 && midiChannelFor (7, false) == 8, "Kanaele");
 
     // Designs: jedes nutzt mehrere Farben, bewegte veraendern sich ueber die Zeit, Wellen wirken lokal
